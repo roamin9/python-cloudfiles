@@ -1,1 +1,0 @@
-为了项目的使用，修改python-cloudfiles，移除CDN功能等等。
