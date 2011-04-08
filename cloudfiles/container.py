@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 container operations
 
@@ -10,8 +13,7 @@ See COPYING for license information.
 """
 
 from storage_object import Object, ObjectResults
-from errors import ResponseError, InvalidContainerName, InvalidObjectName, \
-                   ContainerNotPublic, CDNNotEnabled
+from errors import ResponseError, InvalidContainerName, InvalidObjectName
 from utils  import requires_name
 import consts
 from fjson  import json_loads
@@ -25,27 +27,22 @@ class Container(object):
     """
     Container object and Object instance factory.
 
-    If your account has the feature enabled, containers can be publically
-    shared over a global content delivery network.
-
     @ivar name: the container's name (generally treated as read-only)
     @type name: str
     @ivar object_count: the number of objects in this container (cached)
+                        object数量是缓存的，所以导致不能及时更新？
     @type object_count: number
     @ivar size_used: the sum of the sizes of all objects in this container
             (cached)
     @type size_used: number
-    @ivar cdn_ttl: the time-to-live of the CDN's public cache of this container
-            (cached, use make_public to alter)
-    @type cdn_ttl: number
-    @ivar cdn_log_retention: retention of the logs in the container.
-    @type cdn_log_retention: bool
 
-    @undocumented: _fetch_cdn_data
-    @undocumented: _list_objects_raw
+    _list_objects_raw ---> 发送http请求
     """
     def __set_name(self, name):
+        # 检查名称的合法性
         # slashes make for invalid names
+        # 此处的container名称既可以是str，也可以是unicode，可能会引起一些误会
+        # 不如统一起来
         if isinstance(name, (str, unicode)) and \
                 ('/' in name or len(name) > consts.container_name_limit):
             raise InvalidContainerName(name)
@@ -69,178 +66,6 @@ class Container(object):
         self.conn = connection
         self.object_count = count
         self.size_used = size
-        self.cdn_uri = None
-        self.cdn_ssl_uri = None
-        self.cdn_ttl = None
-        self.cdn_log_retention = None
-        if connection.cdn_enabled:
-            self._fetch_cdn_data()
-
-    @requires_name(InvalidContainerName)
-    def _fetch_cdn_data(self):
-        """
-        Fetch the object's CDN data from the CDN service
-        """
-        response = self.conn.cdn_request('HEAD', [self.name])
-        if (response.status >= 200) and (response.status < 300):
-            for hdr in response.getheaders():
-                if hdr[0].lower() == 'x-cdn-uri':
-                    self.cdn_uri = hdr[1]
-                if hdr[0].lower() == 'x-ttl':
-                    self.cdn_ttl = int(hdr[1])
-                if hdr[0].lower() == 'x-cdn-ssl-uri':
-                    self.cdn_ssl_uri = hdr[1]
-                if hdr[0].lower() == 'x-log-retention':
-                    self.cdn_log_retention = hdr[1] == "True" and True or False
-
-    @requires_name(InvalidContainerName)
-    def make_public(self, ttl=consts.default_cdn_ttl):
-        """
-        Either publishes the current container to the CDN or updates its
-        CDN attributes.  Requires CDN be enabled on the account.
-
-        >>> container.make_public(ttl=604800) # expire in 1 week
-
-        @param ttl: cache duration in seconds of the CDN server
-        @type ttl: number
-        """
-        if not self.conn.cdn_enabled:
-            raise CDNNotEnabled()
-        if self.cdn_uri:
-            request_method = 'POST'
-        else:
-            request_method = 'PUT'
-        hdrs = {'X-TTL': str(ttl), 'X-CDN-Enabled': 'True'}
-        response = self.conn.cdn_request(request_method, \
-                                             [self.name], hdrs=hdrs)
-        if (response.status < 200) or (response.status >= 300):
-            raise ResponseError(response.status, response.reason)
-        self.cdn_ttl = ttl
-        for hdr in response.getheaders():
-            if hdr[0].lower() == 'x-cdn-uri':
-                self.cdn_uri = hdr[1]
-
-    @requires_name(InvalidContainerName)
-    def make_private(self):
-        """
-        Disables CDN access to this container.
-        It may continue to be available until its TTL expires.
-
-        >>> container.make_private()
-        """
-        if not self.conn.cdn_enabled:
-            raise CDNNotEnabled()
-        hdrs = {'X-CDN-Enabled': 'False'}
-        self.cdn_uri = None
-        response = self.conn.cdn_request('POST', [self.name], hdrs=hdrs)
-        if (response.status < 200) or (response.status >= 300):
-            raise ResponseError(response.status, response.reason)
-
-    @requires_name(InvalidContainerName)
-    def purge_from_cdn(self, email=None):
-        """
-        Purge Edge cache for all object inside of this container.
-        You will be notified by email if one is provided when the
-        job completes.
-
-        >>> container.purge_from_cdn("user@dmain.com")
-        
-        or
-
-        >>> container.purge_from_cdn("user@domain.com,user2@domain.com")
-        
-        or
-        
-        >>> container.purge_from_cdn()
-        
-        @param email: A Valid email address
-        @type email: str
-        """
-        if not self.conn.cdn_enabled:
-            raise CDNNotEnabled()
-
-        if email:
-            hdrs = {"X-Purge-Email": email}
-            response = self.conn.cdn_request('DELETE', [self.name], hdrs=hdrs)
-        else:
-            response = self.conn.cdn_request('DELETE', [self.name])
-
-        if (response.status < 200) or (response.status >= 300):
-            raise ResponseError(response.status, response.reason)
-
-    @requires_name(InvalidContainerName)
-    def log_retention(self, log_retention=consts.cdn_log_retention):
-        """
-        Enable CDN log retention on the container. If enabled logs will be
-        periodically (at unpredictable intervals) compressed and uploaded to
-        a ".CDN_ACCESS_LOGS" container in the form of
-        "container_name/YYYY/MM/DD/HH/XXXX.gz". Requires CDN be enabled on the
-        account.
-
-        >>> container.log_retention(True)
-
-        @param log_retention: Enable or disable logs retention.
-        @type log_retention: bool
-        """
-        if not self.conn.cdn_enabled:
-            raise CDNNotEnabled()
-
-        hdrs = {'X-Log-Retention': log_retention}
-        response = self.conn.cdn_request('POST', [self.name], hdrs=hdrs)
-        if (response.status < 200) or (response.status >= 300):
-            raise ResponseError(response.status, response.reason)
-
-        self.cdn_log_retention = log_retention
-
-    def is_public(self):
-        """
-        Returns a boolean indicating whether or not this container is
-        publically accessible via the CDN.
-
-        >>> container.is_public()
-        False
-        >>> container.make_public()
-        >>> container.is_public()
-        True
-
-        @rtype: bool
-        @return: whether or not this container is published to the CDN
-        """
-        if not self.conn.cdn_enabled:
-            raise CDNNotEnabled()
-        return self.cdn_uri is not None
-
-    @requires_name(InvalidContainerName)
-    def public_uri(self):
-        """
-        Return the URI for this container, if it is publically
-        accessible via the CDN.
-
-        >>> connection['container1'].public_uri()
-        'http://c00061.cdn.cloudfiles.rackspacecloud.com'
-
-        @rtype: str
-        @return: the public URI for this container
-        """
-        if not self.is_public():
-            raise ContainerNotPublic()
-        return self.cdn_uri
-
-    @requires_name(InvalidContainerName)
-    def public_ssl_uri(self):
-        """
-        Return the SSL URI for this container, if it is publically
-        accessible via the CDN.
-
-        >>> connection['container1'].public_ssl_uri()
-        'https://c61.ssl.cf0.rackcdn.com'
-
-        @rtype: str
-        @return: the public SSL URI for this container
-        """
-        if not self.is_public():
-            raise ContainerNotPublic()
-        return self.cdn_ssl_uri
 
     @requires_name(InvalidContainerName)
     def create_object(self, object_name):

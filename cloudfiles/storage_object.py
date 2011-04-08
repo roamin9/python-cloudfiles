@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 Object operations
 
@@ -15,7 +18,6 @@ except ImportError:
 import StringIO
 import mimetypes
 import os
-
 from urllib  import quote
 from errors  import ResponseError, NoSuchObject, \
                     InvalidObjectName, IncompleteSend, \
@@ -34,11 +36,6 @@ class Object(object):
     """
     Storage data representing an object, (metadata and data).
 
-    @undocumented: _make_headers
-    @undocumented: _name_check
-    @undocumented: _initialize
-    @undocumented: compute_md5sum
-    @undocumented: __get_conn_for_write
     @ivar name: the object's name (generally treat as read-only)
     @type name: str
     @ivar content_type: the object's content-type (set or read)
@@ -648,38 +645,38 @@ class Object(object):
         return "%s/%s" % (self.container.public_ssl_uri().rstrip('/'),
                 quote(self.name))
 
-    def purge_from_cdn(self, email=None):
-        """
-        Purge Edge cache for this object.
-        You will be notified by email if one is provided when the
-        job completes.
+    #def purge_from_cdn(self, email=None):
+    #    """
+    #    Purge Edge cache for this object.
+    #    You will be notified by email if one is provided when the
+    #    job completes.
 
-        >>> obj.purge_from_cdn("user@dmain.com")
+    #    >>> obj.purge_from_cdn("user@dmain.com")
 
-        or
+    #    or
 
-        >>> obj.purge_from_cdn("user@domain.com,user2@domain.com")
+    #    >>> obj.purge_from_cdn("user@domain.com,user2@domain.com")
 
-        or
+    #    or
 
-        >>> obj.purge_from_cdn()
+    #    >>> obj.purge_from_cdn()
 
-        @param email: A Valid email address
-        @type email: str
-        """
-        if not self.container.conn.cdn_enabled:
-            raise CDNNotEnabled()
+    #    @param email: A Valid email address
+    #    @type email: str
+    #    """
+    #    if not self.container.conn.cdn_enabled:
+    #        raise CDNNotEnabled()
 
-        if email:
-            hdrs = {"X-Purge-Email": email}
-            response = self.container.conn.cdn_request('DELETE',
-                       [self.container.name, self.name], hdrs=hdrs)
-        else:
-            response = self.container.conn.cdn_request('DELETE',
-                       [self.container.name, self.name])
+    #    if email:
+    #        hdrs = {"X-Purge-Email": email}
+    #        response = self.container.conn.cdn_request('DELETE',
+    #                   [self.container.name, self.name], hdrs=hdrs)
+    #    else:
+    #        response = self.container.conn.cdn_request('DELETE',
+    #                   [self.container.name, self.name])
 
-        if (response.status < 200) or (response.status >= 299):
-            raise ResponseError(response.status, response.reason)
+    #    if (response.status < 200) or (response.status >= 299):
+    #        raise ResponseError(response.status, response.reason)
 
 
 class ObjectResults(object):

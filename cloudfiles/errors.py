@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 exception classes
 
@@ -105,18 +108,18 @@ class IncompleteSend(Error):
     pass
 
 
-class ContainerNotPublic(Error):
-    """
-    Raised when public features of a non-public container are accessed.
-    """
-    pass
+#class ContainerNotPublic(Error):
+#    """
+#    Raised when public features of a non-public container are accessed.
+#    """
+#    pass
 
 
-class CDNNotEnabled(Error):
-    """
-    CDN is not enabled for this account.
-    """
-    pass
+#class CDNNotEnabled(Error):
+#    """
+#    CDN is not enabled for this account.
+#    """
+#    pass
 
 
 class AuthenticationFailed(Error):

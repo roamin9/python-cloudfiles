@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """
 connection operations
 
@@ -8,6 +11,7 @@ Container instances.
 See COPYING for license information.
 """
 
+# 既然已经有了高级的httplib，为什么还要使用socket库呢？
 import  socket
 import  os
 from    urllib    import quote
@@ -15,7 +19,7 @@ from    httplib   import HTTPSConnection, HTTPConnection, HTTPException
 from    container import Container, ContainerResults
 from    utils     import unicode_quote, parse_url, THTTPConnection, THTTPSConnection
 from    errors    import ResponseError, NoSuchContainer, ContainerNotEmpty, \
-                         InvalidContainerName, CDNNotEnabled
+                         InvalidContainerName
 from    Queue     import Queue, Empty, Full
 from    time      import time
 import  consts
@@ -32,34 +36,31 @@ class Connection(object):
     Manages the connection to the storage system and serves as a factory
     for Container instances.
 
-    @undocumented: cdn_connect
-    @undocumented: http_connect
-    @undocumented: cdn_request
-    @undocumented: make_request
-    @undocumented: _check_container_name
+    create container ---> PUT
+    delete container ---> DELETE
+    rename container ---> POST  没实现
+    set ACL          ---> POST  没实现
+    get container    ---> GET
+    get info         ---> HEAD
+    list containers  ---> GET 解析json数据
+    _authenticate ---> 认证
+    http_connect  ---> 生成conn连接
+    make_request  ---> 向服务端发送http请求
     """
 
     def __init__(self, username=None, api_key=None, timeout=5, **kwargs):
         """
-        Accepts keyword arguments for Mosso username and api key.
+        Accepts keyword arguments for chouti username and api key.
         Optionally, you can omit these keywords and supply an
-        Authentication object using the auth keyword. Setting the argument
-        servicenet to True will make use of Rackspace servicenet network.
+        Authentication object using the auth keyword. 
 
         @type username: str
-        @param username: a Mosso username
+        @param username: a chouti username, pattern is account:admin
         @type api_key: str
-        @param api_key: a Mosso API key
-        @type servicenet: bool
-        @param servicenet: Use Rackspace servicenet to access Cloud Files.
-        @type cdn_log_retention: bool
-        @param cdn_log_retention: set logs retention for this cdn enabled
+        @param api_key: a chouti password
         container.
         """
-        self.cdn_enabled = False
-        self.cdn_args = None
         self.connection_args = None
-        self.cdn_connection = None
         self.connection = None
         self.token = None
         self.debuglevel = int(kwargs.get('debuglevel', 0))
@@ -67,17 +68,12 @@ class Connection(object):
         self.user_agent = kwargs.get('useragent', consts.user_agent)
         self.timeout = timeout
 
-        # if the environement variable RACKSPACE_SERVICENET is set (to
-        # anything) it will automatically set servicenet=True
-        if not 'servicenet' in kwargs \
-                and 'RACKSPACE_SERVICENET' in os.environ:
-            self.servicenet = True
-
         self.auth = 'auth' in kwargs and kwargs['auth'] or None
 
         if not self.auth:
-            authurl = kwargs.get('authurl', consts.us_authurl)
+            authurl = kwargs.get('authurl', consts.chouti_authurl)
             if username and api_key and authurl:
+                # 此处的auth为Authentication类的实例
                 self.auth = Authentication(username, api_key, authurl=authurl,
                             useragent=self.user_agent)
             else:
@@ -88,9 +84,9 @@ class Connection(object):
     def _authenticate(self):
         """
         Authenticate and setup this instance with the values returned.
+        私有方法，开始认证
         """
-        (url, self.cdn_url, self.token) = self.auth.authenticate()
-        url = self._set_storage_url(url)
+        (url, self.token) = self.auth.authenticate()
         self.connection_args = parse_url(url)
 
         if version_info[0] <= 2 and version_info[1] < 6:
@@ -100,21 +96,6 @@ class Connection(object):
             self.conn_class = self.connection_args[3] and HTTPSConnection or \
                                                               HTTPConnection
         self.http_connect()
-        if self.cdn_url:
-            self.cdn_connect()
-
-    def _set_storage_url(self, url):
-        if self.servicenet:
-            return "https://snet-%s" % url.replace("https://", "")
-        return url
-
-    def cdn_connect(self):
-        """
-        Setup the http connection instance for the CDN service.
-        """
-        (host, port, cdn_uri, is_ssl) = parse_url(self.cdn_url)
-        self.cdn_connection = self.conn_class(host, port, timeout=self.timeout)
-        self.cdn_enabled = True
 
     def http_connect(self):
         """
@@ -125,58 +106,40 @@ class Connection(object):
                                               timeout=self.timeout)
         self.connection.set_debuglevel(self.debuglevel)
 
-    def cdn_request(self, method, path=[], data='', hdrs=None):
-        """
-        Given a method (i.e. GET, PUT, POST, etc), a path, data, header and
-        metadata dicts, performs an http request against the CDN service.
-        """
-        if not self.cdn_enabled:
-            raise CDNNotEnabled()
-
-        path = '/%s/%s' % \
-                 (self.uri.rstrip('/'), '/'.join([unicode_quote(i) for i in path]))
-        headers = {'Content-Length': str(len(data)),
-                   'User-Agent': self.user_agent,
-                   'X-Auth-Token': self.token}
-        if isinstance(hdrs, dict):
-            headers.update(hdrs)
-
-        def retry_request():
-            '''Re-connect and re-try a failed request once'''
-            self.cdn_connect()
-            self.cdn_connection.request(method, path, data, headers)
-            return self.cdn_connection.getresponse()
-
-        try:
-            self.cdn_connection.request(method, path, data, headers)
-            response = self.cdn_connection.getresponse()
-        except (socket.error, IOError, HTTPException):
-            response = retry_request()
-        if response.status == 401:
-            self._authenticate()
-            headers['X-Auth-Token'] = self.token
-            response = retry_request()
-
-        return response
-
     def make_request(self, method, path=[], data='', hdrs=None, parms=None):
         """
         Given a method (i.e. GET, PUT, POST, etc), a path, data, header and
         metadata dicts, and an optional dictionary of query parameters,
         performs an http request.
+        
+        @type method: str
+        @param method: http method
+        @type path: list
+        @param path: the url's path, include [container_name], [obj_name]
+        @type hdrs: dict
+        @param hdrs: http headers
+        @type parms: dict
+        @param parms: query args
         """
         path = '/%s/%s' % \
                  (self.uri.rstrip('/'), '/'.join([unicode_quote(i) for i in path]))
 
         if isinstance(parms, dict) and parms:
+                # 查询参数中的变量是固定的，为limits等字符，都为英文字符
+                # 但查询参数中的值有可能是unicode值，
+                # 因此，对于对于查询参数中的值需要进行unicode处理，使用unicode_quote()
+                # 这应该算一个bug，可以提交给作者
             query_args = \
-                ['%s=%s' % (quote(x),
-                            quote(str(y))) for (x, y) in parms.items()]
+                ['%s=%s' % (unicode_quote(x),
+                            unicode_quote(y)) for (x, y) in parms.items()]
             path = '%s?%s' % (path, '&'.join(query_args))
 
-        headers = {'Content-Length': str(len(data)),
+        headers = {
+                   # 设置了Content-Length，这样上传或下载文件时需要优化一下
+                   'Content-Length': str(len(data)),
                    'User-Agent': self.user_agent,
-                   'X-Auth-Token': self.token}
+                   'X-Auth-Token': self.token
+                   }
         isinstance(hdrs, dict) and headers.update(hdrs)
 
         def retry_request():
@@ -227,6 +190,7 @@ class Connection(object):
         return (count, size)
 
     def _check_container_name(self, container_name):
+                # container名称中不能包含'/'
         if not container_name or \
                 '/' in container_name or \
                 len(container_name) > consts.container_name_limit:
@@ -262,6 +226,7 @@ class Connection(object):
         @param container_name: name of the container to delete
         @type container_name: str
         """
+        # Container类的实例
         if isinstance(container_name, Container):
             container_name = container_name.name
         self._check_container_name(container_name)
@@ -275,9 +240,10 @@ class Connection(object):
         elif (response.status < 200) or (response.status > 299):
             raise ResponseError(response.status, response.reason)
 
-        if self.cdn_enabled:
-            response = self.cdn_request('POST', [container_name],
-                                hdrs={'X-CDN-Enabled': 'False'})
+        # 一旦删除了一个container，需要标记CDN的状态为关闭
+        #if self.cdn_enabled:
+        #    response = self.cdn_request('POST', [container_name],
+        #                        hdrs={'X-CDN-Enabled': 'False'})
 
     def get_all_containers(self, limit=None, marker=None, **parms):
         """
@@ -340,21 +306,21 @@ class Connection(object):
             raise ResponseError(response.status, response.reason)
         return Container(self, container_name, count, size)
 
-    def list_public_containers(self):
-        """
-        Returns a list of containers that have been published to the CDN.
+    #def list_public_containers(self):
+    #    """
+    #    Returns a list of containers that have been published to the CDN.
 
-        >>> connection.list_public_containers()
-        ['container1', 'container2', 'container3']
+    #    >>> connection.list_public_containers()
+    #    ['container1', 'container2', 'container3']
 
-        @rtype: list(str)
-        @return: a list of all CDN-enabled container names as strings
-        """
-        response = self.cdn_request('GET', [''])
-        if (response.status < 200) or (response.status > 299):
-            buff = response.read()
-            raise ResponseError(response.status, response.reason)
-        return response.read().splitlines()
+    #    @rtype: list(str)
+    #    @return: a list of all CDN-enabled container names as strings
+    #    """
+    #    response = self.cdn_request('GET', [''])
+    #    if (response.status < 200) or (response.status > 299):
+    #        buff = response.read()
+    #        raise ResponseError(response.status, response.reason)
+    #    return response.read().splitlines()
 
     def list_containers_info(self, limit=None, marker=None, **parms):
         """
@@ -456,7 +422,10 @@ class ConnectionPool(Queue):
         try:
             (create, connobj) = Queue.get(self, block=0)
         except Empty:
-            connobj = Connection(**self.connargs)
+            # 此处生成连接池时，传递的参数有误，应该为bug，可以报告给作者
+            #connobj = Connection(**self.connargs)
+            connobj = Connection(username=self.connargs.get('username'), 
+                    api_key=self.connargs.get('api_key'))
         return connobj
 
     def put(self, connobj):

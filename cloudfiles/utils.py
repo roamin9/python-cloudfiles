@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 """ See COPYING for license information. """
 
 import re
@@ -60,10 +63,16 @@ def unicode_quote(s):
     http://mail.python.org/pipermail/python-dev/2006-July/067248.html
     """
     if isinstance(s, unicode):
+        # recive unicode object, return utf-8 string
+        # for URL encode and quote
         return quote(s.encode("utf-8"))
     else:
         return quote(str(s))
 
+
+# 下面的THTTPConnection, THTTPSConnection是为了隐藏私有变量，为了封装吧？
+# 原来，THTTPConnection, THTTPSConnection是为了兼容python 2.6以下的版本。如果不需要兼容的话，下面的地方就可以删除了
+# 用httplib2如何来写呢？
 
 class THTTPConnection(HTTPConnection):
     def __init__(self, host, port, timeout):

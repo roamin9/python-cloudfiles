@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 from tokenize  import  generate_tokens, STRING, NAME, OP
 from cStringIO import  StringIO
 from re        import  compile, DOTALL
