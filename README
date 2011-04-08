@@ -1,0 +1,1 @@
+edit python-cloudfiles ,remove CDN support for swift
