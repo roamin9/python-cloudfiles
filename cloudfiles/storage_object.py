@@ -75,11 +75,13 @@ class Object(object):
         self.manifest = None
         if object_record:
             self.name = object_record['name']
-            self.content_type = object_record['content_type']
-            self.size = object_record['bytes']
-            self.last_modified = object_record['last_modified']
-            self._etag = object_record['hash']
-            self._etag_override = False
+            #self.content_type = object_record['content_type']
+            #self.size = object_record['bytes']
+            #self.last_modified = object_record['last_modified']
+            #self._etag = object_record['hash']
+            #self._etag_override = False
+            # roamin9 communicate with remote server
+            self._initialize()
         else:
             self.name = name
             self.content_type = None
@@ -702,6 +704,10 @@ class ObjectResults(object):
 
     def __getitem__(self, key):
         return Object(self.container, object_record=self._objects[key])
+        # roamin9 force object communicate with remote server
+        #         _initialze()
+        #         else, no obj.metadata and obj.manifest info
+        #return Object(self.container)
 
     def __getslice__(self, i, j):
         return [Object(self.container, object_record=k) \
