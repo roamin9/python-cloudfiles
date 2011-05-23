@@ -68,6 +68,15 @@ class Connection(object):
         self.user_agent = kwargs.get('useragent', consts.user_agent)
         self.timeout = timeout
 
+        self.username = username
+        self.api_key = api_key
+        self._share_user_uri = kwargs.get('_share_user_uri', None)
+        self._share_request = kwargs.get('_share_request', False)
+
+        if kwargs.get('share_request', False):
+            # 产生一个专为共享请求的请求连接方法
+            self.make_request = self.make_share_requst
+
         self.auth = 'auth' in kwargs and kwargs['auth'] or None
 
         if not self.auth:
@@ -97,6 +106,26 @@ class Connection(object):
                                                               HTTPConnection
         self.http_connect()
 
+    def authorization(self, url=None):
+        """
+        授权功能
+        @type url: str
+        @param url: 用户接收到的共享文件的链接. url需要解析，解析出container与object
+        先认证授权，成功后返回连接对象，此对象所使用的make_request均为share_request
+        """
+        path = []
+        self._share_user_uri, cont = url.rsplit('/', 1)
+        # 临时开关，临时使用share_request
+        self._share_request = True
+        path.append(cont)
+        resp = self.make_request('HEAD', path)
+        if resp.status == 204:
+            self._share_request = False
+            return Connection(self.username, self.api_key, _share_request=True, _share_user_uri = self._share_user_uri)
+        else:
+            self._share_request = False
+            return None
+
     def http_connect(self):
         """
         Setup the http connection instance.
@@ -121,8 +150,12 @@ class Connection(object):
         @type parms: dict
         @param parms: query args
         """
-        path = '/%s/%s' % \
-                 (self.uri.rstrip('/'), '/'.join([unicode_quote(i) for i in path]))
+        if self._share_request and self._share_user_uri:
+            path = '/%s/%s' % \
+                     (self._share_user_uri.rstrip('/'), '/'.join([unicode_quote(i) for i in path]))
+        else:
+            path = '/%s/%s' % \
+                     (self.uri.rstrip('/'), '/'.join([unicode_quote(i) for i in path]))
 
         if isinstance(parms, dict) and parms:
                 # 查询参数中的变量是固定的，为limits等字符，都为英文字符
