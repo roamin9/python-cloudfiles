@@ -131,6 +131,9 @@ class Connection(object):
         Setup the http connection instance.
         """
         (host, port, self.uri, is_ssl) = self.connection_args
+        # roamin9 set the authorization conn's right uri
+        if self._share_request:
+            self.uri = self._share_user_uri
         self.connection = self.conn_class(host, port=port, \
                                               timeout=self.timeout)
         self.connection.set_debuglevel(self.debuglevel)
